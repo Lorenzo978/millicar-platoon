@@ -63,6 +63,7 @@ static void Rx (Ptr<OutputStreamWrapper> stream, Ptr<const Packet> p)
 
 int main (int argc, char *argv[])
 {
+  std::cout << "----------- Start -----------" << std::endl;
   // This script creates two nodes moving at 20 m/s, placed at a distance of 10 m.
   // These nodes exchange packets through a UDP application,
   // and they communicate using a wireless channel.
@@ -73,14 +74,19 @@ int main (int argc, char *argv[])
   uint32_t numerology = 3; // the numerology
 
   // applications
-  uint32_t packetSize = 6000; // UDP packet size in bytes
+  uint32_t nodeNumber = 6;
+  uint32_t packetSize = 350; // UDP packet size in bytes
   uint32_t startTime = 1000; // application start time in milliseconds
-  uint32_t endTime = 31000; // application end time in milliseconds
-  uint32_t interPacketInterval = 2000; // interpacket interval in milliseconds
+  uint32_t endTime = 4300; // application end time in milliseconds
+  uint32_t interPacketInterval = 33; // interpacket interval in milliseconds
 
   // mobility
-  double speed = 20; // speed of the vehicles m/s
-  double intraGroupDistance = 10; // distance between two vehicles belonging to the same group
+  double speed = 27.7; // speed of the vehicles m/s
+  double intraGroupDistance = 1; // distance between two vehicles belonging to the same group
+  uint32_t ct;
+  double totalPacket = ((endTime-startTime)/interPacketInterval) * (nodeNumber-1);
+  AsciiTraceHelper asciiTraceHelper;
+  Ptr<OutputStreamWrapper> stream = asciiTraceHelper.CreateFileStream ("scratch/lowest-6v-highdensity.txt");
 
   CommandLine cmd;
   //
@@ -109,20 +115,17 @@ int main (int argc, char *argv[])
 
   // create the nodes
   NodeContainer n;
-  n.Create (3);
+  n.Create (nodeNumber);
   // create the mobility models
   MobilityHelper mobility;
   mobility.SetMobilityModel ("ns3::ConstantVelocityMobilityModel");
   mobility.Install (n);
 
-  n.Get (0)->GetObject<MobilityModel> ()->SetPosition (Vector (0,intraGroupDistance*2,0)); //platoon leader
-  n.Get (0)->GetObject<ConstantVelocityMobilityModel> ()->SetVelocity (Vector (0, speed, 0));
-
-  n.Get (1)->GetObject<MobilityModel> ()->SetPosition (Vector (0, intraGroupDistance,  0));
-  n.Get (1)->GetObject<ConstantVelocityMobilityModel> ()->SetVelocity (Vector (0, speed, 0));
-
-  n.Get (2)->GetObject<MobilityModel> ()->SetPosition (Vector (0, 0,  0));
-  n.Get (2)->GetObject<ConstantVelocityMobilityModel> ()->SetVelocity (Vector (0, speed, 0));
+  for(ct = 0; ct < nodeNumber; ct++)
+  {
+    n.Get (ct)->GetObject<MobilityModel> ()->SetPosition (Vector (0,intraGroupDistance*(nodeNumber-ct),0));
+    n.Get (ct)->GetObject<ConstantVelocityMobilityModel> ()->SetVelocity (Vector (0, speed, 0));
+  }
 
   // create and configure the helper
   Ptr<MmWaveVehicularHelper> helper = CreateObject<MmWaveVehicularHelper> ();
@@ -168,28 +171,28 @@ int main (int argc, char *argv[])
   ApplicationContainer echoApps = server.Install (n.Get (0));
   echoApps.Start (Seconds (0.0));
 
-  AsciiTraceHelper asciiTraceHelper;
-  Ptr<OutputStreamWrapper> stream = asciiTraceHelper.CreateFileStream ("scratch/platoon-stats.txt");
+
   echoApps.Get(0)->TraceConnectWithoutContext ("Rx", MakeBoundCallback (&Rx, stream));
 
   UdpClientHelper client (n.Get (0)->GetObject<Ipv4> ()->GetAddress (1, 0).GetLocal (), port);
-  ApplicationContainer a1 = client.Install (n.Get (1));
-  ApplicationContainer a2 = client.Install (n.Get (2));
 
-  // set the application start/end time
-  a1.Start (MilliSeconds (startTime));
-  a1.Stop (MilliSeconds (endTime));
+  for(ct = 1; ct < nodeNumber; ct++)
+  {
+    ApplicationContainer a = client.Install (n.Get (ct));
+    a.Start (MilliSeconds (startTime));
+    a.Stop (MilliSeconds (endTime));
+  }
 
-  a2.Start (MilliSeconds (startTime));
-  a2.Stop (MilliSeconds (endTime));
-
-  Simulator::Stop (MilliSeconds (endTime + 50));
+  Simulator::Stop(MilliSeconds (endTime + 50));
   Simulator::Run ();
   Simulator::Destroy ();
 
   std::cout << "----------- Statistics -----------" << std::endl;
   std::cout << "Packets size:\t\t" << packetSize << " Bytes" << std::endl;
+  std::cout << "Duration:\t\t" << endTime-startTime << std::endl;
   std::cout << "Packets received:\t" << g_rxPackets << std::endl;
+  std::cout << "Total packet sent:\t" << totalPacket << std::endl;
+  std::cout << "Packet rate loss:\t" << ((totalPacket-g_rxPackets)/totalPacket) << "%" << std::endl;
   std::cout << "Average Throughput:\t" << (double(g_rxPackets)*(double(packetSize)*8)/double( g_lastReceived.GetSeconds() - g_firstReceived.GetSeconds()))/1e6 << " Mbps" << std::endl;
 
   return 0;
