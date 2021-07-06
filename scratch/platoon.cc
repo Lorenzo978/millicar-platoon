@@ -44,7 +44,7 @@ double averageRTT;
 
 
 uint32_t nodeNumber = 5;
-uint32_t packetSize = 1200; // UDP packet size in bytes
+uint32_t packetSize = 350; // UDP packet size in bytes
 uint32_t startTime = 1000; // application start time in milliseconds
 uint32_t endTime = 4300; // application end time in milliseconds
 double interPacketInterval = 33; // interpacket interval in milliseconds
@@ -63,7 +63,7 @@ static void Rx (Ptr<OutputStreamWrapper> stream, Ptr<const Packet> p)
   p->PeekHeader(header);
   packetSentCounter++;
 
-  *stream->GetStream () << Simulator::Now ().GetSeconds () << "\t" << packetSentCounter << "\t" << header.GetSeq() << "\t" << header.GetTs().GetSeconds() << std::endl;
+  //*stream->GetStream () << Simulator::Now ().GetSeconds () << "\t" << packetSentCounter << "\t" << header.GetSeq() << "\t" << header.GetTs().GetSeconds() << std::endl;
   
   // Calcolo l'avarage RTT per l'ultimo veicolo del platoon
   if(packetSentCounter == nodeNumber-1)
@@ -73,7 +73,7 @@ static void Rx (Ptr<OutputStreamWrapper> stream, Ptr<const Packet> p)
   }
 
   
-  NS_LOG_DEBUG(Simulator::Now ().GetSeconds () << "\t" << header.GetSeq());
+  NS_LOG_DEBUG("[RICEVO] LIVELLO APPLICAZIONE\t" << p->GetUid() << "\t"<< Simulator::Now ().GetSeconds () << "s\t" << header.GetSeq());
   averageRTT = averageRTT + Simulator::Now ().GetSeconds ()-header.GetTs().GetSeconds();
 
   if (g_rxPackets > 1)
@@ -90,6 +90,9 @@ static void Rx (Ptr<OutputStreamWrapper> stream, Ptr<const Packet> p)
 int main (int argc, char *argv[])
 {
   LogComponentEnable("ThreeVehiclePlatoon", LOG_LEVEL_DEBUG);
+  LogComponentEnable("MmWaveVehicularNetDevice", LOG_LEVEL_DEBUG);
+  LogComponentEnable("MmWaveSidelinkMac", LOG_LEVEL_DEBUG);
+  LogComponentEnable("MmWaveSidelinkSpectrumPhy", LOG_LEVEL_ERROR);
   std::cout << "----------- Start -----------" << std::endl;
 
   // system parameters
@@ -101,8 +104,7 @@ int main (int argc, char *argv[])
   double speed = 27.7; // speed of the vehicles m/s
   uint32_t ct;
   double totalPacket = ((endTime-startTime)/interPacketInterval) * (nodeNumber-1);
-  AsciiTraceHelper asciiTraceHelper;
-  Ptr<OutputStreamWrapper> stream = asciiTraceHelper.CreateFileStream ("scratch/test.txt");
+
 
   CommandLine cmd;
   //
@@ -166,11 +168,11 @@ int main (int argc, char *argv[])
   helper->PairDevices(devs);
 
   // Set the routing table
-  Ipv4StaticRoutingHelper ipv4RoutingHelper;
-  Ptr<Ipv4StaticRouting> staticRouting = ipv4RoutingHelper.GetStaticRouting (n.Get (0)->GetObject<Ipv4> ());
-  staticRouting->SetDefaultRoute (n.Get (1)->GetObject<Ipv4> ()->GetAddress (1, 0).GetLocal () , 2 );
+  //Ipv4StaticRoutingHelper ipv4RoutingHelper;
+  //Ptr<Ipv4StaticRouting> staticRouting = ipv4RoutingHelper.GetStaticRouting (n.Get (0)->GetObject<Ipv4> ());
+  //staticRouting->SetDefaultRoute (n.Get (1)->GetObject<Ipv4> ()->GetAddress (1, 0).GetLocal () , 2 );
 
-  Ptr<mmwave::MmWaveAmc> m_amc = CreateObject <mmwave::MmWaveAmc> (helper->GetConfigurationParameters());
+  //Ptr<mmwave::MmWaveAmc> m_amc = CreateObject <mmwave::MmWaveAmc> (helper->GetConfigurationParameters());
 
   // setup the applications
   Config::SetDefault ("ns3::UdpClient::MaxPackets", UintegerValue (0xFFFFFFFF));
@@ -178,23 +180,29 @@ int main (int argc, char *argv[])
   Config::SetDefault ("ns3::UdpClient::PacketSize", UintegerValue (packetSize));
 
   // create the applications
-  uint32_t port = 4000;
+  uint32_t startingPort = 4000;
+ 
+  for(ct = 1; ct < nodeNumber;ct++)
+  {
+    UdpEchoServerHelper server (startingPort+ct-1);
+    ApplicationContainer echoApps = server.Install (n.Get (0));
+    echoApps.Start (Seconds (0.0));
 
-  UdpEchoServerHelper server (port);
-  ApplicationContainer echoApps = server.Install (n.Get (0));
-  echoApps.Start (Seconds (0.0));
+    AsciiTraceHelper asciiTraceHelper;
+    Ptr<OutputStreamWrapper> stream = asciiTraceHelper.CreateFileStream ("scratch/test.txt");
+    echoApps.Get(0)->TraceConnectWithoutContext ("Rx", MakeBoundCallback (&Rx, stream));
+  }
 
-
-  echoApps.Get(0)->TraceConnectWithoutContext ("Rx", MakeBoundCallback (&Rx, stream));
-
-  UdpClientHelper client (n.Get (0)->GetObject<Ipv4> ()->GetAddress (1, 0).GetLocal (), port);
 
   for(ct = 1; ct < nodeNumber; ct++)
   {
+    UdpClientHelper client (n.Get (0)->GetObject<Ipv4> ()->GetAddress (1, 0).GetLocal (), startingPort+ct-1);
     ApplicationContainer a = client.Install (n.Get (ct));
     a.Start (MilliSeconds (startTime));
     a.Stop (MilliSeconds (endTime));
   }
+
+  Ipv4GlobalRoutingHelper::PopulateRoutingTables ();
 
   Simulator::Stop(MilliSeconds (endTime + 100));
   Simulator::Run ();
